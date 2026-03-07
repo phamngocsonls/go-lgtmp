@@ -9,13 +9,16 @@
 #   make run           # go run ./cmd/server
 #   make load          # generate demo traffic
 #   make infra-down    # docker compose down -v
+#
+# Image versions are pinned to avoid breaking changes from upstream.
+# Update versions intentionally rather than relying on :latest tags.
 
 services:
 
   # ── Databases ─────────────────────────────────────────────────────────────
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.13-alpine
     environment:
       POSTGRES_DB: demo
       POSTGRES_USER: demo
@@ -31,7 +34,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.8-alpine
     ports:
       - "6379:6379"
     command: redis-server --save "" --appendonly no  # memory-only for dev
@@ -48,7 +51,7 @@ services:
   # Grafana have built-in retry logic so transient startup ordering is fine.
 
   tempo:
-    image: grafana/tempo:2.6.1   # pinned: latest (v2.10) has unstable live_store partition ring in single-node mode
+    image: grafana/tempo:2.10.1
     ports:
       - "3200:3200"   # Tempo HTTP API (Grafana datasource)
       - "9095:9095"   # Tempo gRPC
@@ -58,7 +61,7 @@ services:
     command: -config.file=/etc/tempo.yaml
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.6.7
     ports:
       - "3100:3100"
     volumes:
@@ -67,7 +70,7 @@ services:
     command: -config.file=/etc/loki/loki.yaml
 
   mimir:
-    image: grafana/mimir:latest
+    image: grafana/mimir:2.17.7
     ports:
       - "9009:9009"
     volumes:
@@ -76,7 +79,7 @@ services:
     command: -config.file=/etc/mimir/mimir.yaml
 
   pyroscope:
-    image: grafana/pyroscope:latest
+    image: grafana/pyroscope:1.18.1
     ports:
       - "4040:4040"
     volumes:
@@ -85,7 +88,7 @@ services:
   # Grafana Alloy: OTel collector + Prometheus scraper + log forwarder.
   # See observability/alloy/config.alloy for the full pipeline definition.
   alloy:
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.13.2
     ports:
       - "4317:4317"   # OTLP gRPC  (traces + logs from Go service)
       - "4318:4318"   # OTLP HTTP
@@ -106,7 +109,7 @@ services:
       - mimir
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:12.4.0
     ports:
       - "3000:3000"   # Grafana UI — http://localhost:3000
     environment:

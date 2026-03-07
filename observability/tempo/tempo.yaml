@@ -1,6 +1,9 @@
 # Tempo configuration for the go-lgtmp local dev stack.
-# Pinned to grafana/tempo:2.6.1 — v2.10+ has an unstable live_store partition
-# ring in single-node mode that causes "empty ring" errors on recent-trace queries.
+# Verified against grafana/tempo:2.10.1
+#
+# Single-node pattern: memberlist gossip ring with inmemory kvstore keeps
+# all ring state in-process. The ingester registers itself so the querier can
+# find live (WAL) data without "empty ring" errors.
 #
 # Receives OTLP traces from Grafana Alloy and stores them locally.
 # The metrics generator builds service-graph and span-metrics from traces
@@ -22,8 +25,32 @@ distributor:
           endpoint: 0.0.0.0:4318
 
 # ── Ingester ─────────────────────────────────────────────────────────────────
+# lifecycler.ring.kvstore.store: inmemory registers the ingester in an
+# in-process ring. The querier's frontend_worker (below) then finds it
+# without needing an external KV store.
 ingester:
-  max_block_duration: 5m   # flush to storage every 5 min (short for local dev)
+  max_block_duration: 5m
+  trace_idle_period: 10s
+  lifecycler:
+    address: 127.0.0.1
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    min_ready_duration: 1s
+
+# ── Memberlist ────────────────────────────────────────────────────────────────
+# Loopback-only gossip — single node, no real cluster needed.
+memberlist:
+  bind_addr: [127.0.0.1]
+  bind_port: 7947
+
+# ── Querier ───────────────────────────────────────────────────────────────────
+# frontend_worker connects back to the query_frontend running in the same
+# process so searches fan out to the local ingester via the in-memory ring.
+querier:
+  frontend_worker:
+    frontend_address: 127.0.0.1:9095
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 storage:
@@ -38,14 +65,12 @@ storage:
 # Generates Prometheus metrics FROM trace spans. Enables the service map
 # visualization in the Grafana Tempo datasource.
 #
-# service-graphs: tracks service-to-service call counts and latency
-#   → tempo_service_graph_request_total, tempo_service_graph_request_duration_seconds
-#
+# service-graphs: service-to-service call counts and latency
+#   → tempo_service_graph_request_total, …_duration_seconds
 # span-metrics: RED metrics derived from span data
-#   → traces_spanmetrics_calls_total, traces_spanmetrics_duration_seconds
+#   → traces_spanmetrics_calls_total, …_duration_seconds
 #
-# These metrics are remote-written to Mimir and used by the Grafana Tempo
-# datasource's "Service Graph" panel (requires serviceMap.datasourceUid = prometheus).
+# Remote-written to Mimir and used by the Grafana Tempo service map panel.
 metrics_generator:
   registry:
     external_labels:
@@ -58,10 +83,8 @@ metrics_generator:
         send_exemplars: true
 
 # ── Per-tenant overrides ──────────────────────────────────────────────────────
-# In single-tenant mode, "anonymous" is the default tenant.
+# In single-tenant mode "anonymous" is the default tenant.
 overrides:
   defaults:
     metrics_generator:
-      processors:
-        - service-graphs
-        - span-metrics
+      processors: [service-graphs, span-metrics]
