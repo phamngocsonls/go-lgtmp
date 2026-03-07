@@ -1,5 +1,6 @@
 # Tempo configuration for the go-lgtmp local dev stack.
-# Verified against grafana/tempo:latest (v2.10.x)
+# Pinned to grafana/tempo:2.6.1 — v2.10+ has an unstable live_store partition
+# ring in single-node mode that causes "empty ring" errors on recent-trace queries.
 #
 # Receives OTLP traces from Grafana Alloy and stores them locally.
 # The metrics generator builds service-graph and span-metrics from traces
@@ -23,24 +24,6 @@ distributor:
 # ── Ingester ─────────────────────────────────────────────────────────────────
 ingester:
   max_block_duration: 5m   # flush to storage every 5 min (short for local dev)
-  lifecycler:
-    address: 127.0.0.1
-    ring:
-      kvstore:
-        store: inmemory
-      replication_factor: 1
-    final_sleep: 0s
-
-# ── Live store ────────────────────────────────────────────────────────────────
-# Tempo v2.10 introduced "live_store" — the component that serves recent
-# (in-WAL) traces to the querier. In single-node mode it uses a partition ring
-# to locate owners; the default kvstore is memberlist which requires clustering.
-# Set to inmemory so the ring is populated locally and queries don't fail with
-# "error finding partition ring replicas: empty ring".
-live_store:
-  partition_ring:
-    kvstore:
-      store: inmemory
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 storage:

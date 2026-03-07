@@ -48,7 +48,7 @@ services:
   # Grafana have built-in retry logic so transient startup ordering is fine.
 
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.6.1   # pinned: latest (v2.10) has unstable live_store partition ring in single-node mode
     ports:
       - "3200:3200"   # Tempo HTTP API (Grafana datasource)
       - "9095:9095"   # Tempo gRPC
