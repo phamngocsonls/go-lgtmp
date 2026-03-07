@@ -56,6 +56,14 @@ metrics_generator:
       - url: http://mimir:9009/api/v1/push
         send_exemplars: true
 
+# ── Querier ───────────────────────────────────────────────────────────────────
+# In monolithic/single-node mode, Tempo v2.7+ uses a partition ring to locate
+# ingesters. With only one node the ring appears empty to the querier.
+# search_prefer_self tells the querier to search the local ingester directly
+# instead of going through the ring, fixing "empty ring" errors.
+querier:
+  search_prefer_self: 10
+
 # ── Per-tenant overrides ──────────────────────────────────────────────────────
 # In single-tenant mode, "anonymous" is the default tenant.
 overrides:
