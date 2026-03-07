@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-lgtmp
+  labels:
+    app: go-lgtmp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-lgtmp
+  template:
+    metadata:
+      labels:
+        app: go-lgtmp
+      annotations:
+        # Prometheus scrape annotations (used by Alloy / kube-prometheus-stack)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: go-lgtmp
+          # Tag is updated by CI via: kubectl set image deployment/go-lgtmp go-lgtmp=<new-tag>
+          image: ghcr.io/go-lgtmp/go-lgtmp:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: go-lgtmp-config
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

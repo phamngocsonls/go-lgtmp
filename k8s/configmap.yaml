@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: go-lgtmp-config
+  labels:
+    app: go-lgtmp
+data:
+  # OpenTelemetry — point to your Alloy / OTel Collector OTLP gRPC receiver
+  OTEL_SERVICE_NAME: "go-lgtmp"
+  OTEL_SERVICE_VERSION: "0.0.1"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy.monitoring.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+
+  # Pyroscope — point to your Pyroscope server
+  PYROSCOPE_SERVER_ADDRESS: "http://pyroscope.monitoring.svc.cluster.local:4040"
+
+  # App config
+  PORT: "8080"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "info"
+
+  # Optional: PostgreSQL — enables /db/* trace demo endpoints.
+  # Move DATABASE_DSN to a Secret and reference it via secretKeyRef in production.
+  # DATABASE_DSN: "postgres://user:pass@postgres.default.svc.cluster.local:5432/demo?sslmode=require"
+
+  # Optional: Redis — enables /cache/* trace demo endpoints.
+  # REDIS_ADDR: "redis.default.svc.cluster.local:6379"
