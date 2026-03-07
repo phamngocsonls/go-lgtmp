@@ -23,6 +23,24 @@ distributor:
 # ── Ingester ─────────────────────────────────────────────────────────────────
 ingester:
   max_block_duration: 5m   # flush to storage every 5 min (short for local dev)
+  lifecycler:
+    address: 127.0.0.1
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+
+# ── Live store ────────────────────────────────────────────────────────────────
+# Tempo v2.10 introduced "live_store" — the component that serves recent
+# (in-WAL) traces to the querier. In single-node mode it uses a partition ring
+# to locate owners; the default kvstore is memberlist which requires clustering.
+# Set to inmemory so the ring is populated locally and queries don't fail with
+# "error finding partition ring replicas: empty ring".
+live_store:
+  partition_ring:
+    kvstore:
+      store: inmemory
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 storage:
@@ -55,14 +73,6 @@ metrics_generator:
     remote_write:
       - url: http://mimir:9009/api/v1/push
         send_exemplars: true
-
-# ── Querier ───────────────────────────────────────────────────────────────────
-# In monolithic/single-node mode, Tempo v2.7+ uses a partition ring to locate
-# ingesters. With only one node the ring appears empty to the querier.
-# search_prefer_self tells the querier to search the local ingester directly
-# instead of going through the ring, fixing "empty ring" errors.
-querier:
-  search_prefer_self: 10
 
 # ── Per-tenant overrides ──────────────────────────────────────────────────────
 # In single-tenant mode, "anonymous" is the default tenant.
