@@ -76,6 +76,11 @@ metrics_generator:
     external_labels:
       source: tempo
       cluster: docker-compose
+  # traces_storage: required for the local-blocks processor (TraceQL metrics API).
+  # Stores raw trace data so the querier can execute TraceQL metric queries
+  # (used by Grafana Explore Traces / Traces Drilldown).
+  traces_storage:
+    path: /var/tempo/generator/traces
   storage:
     path: /var/tempo/generator/wal
     remote_write:
@@ -84,7 +89,8 @@ metrics_generator:
 
 # ── Per-tenant overrides ──────────────────────────────────────────────────────
 # In single-tenant mode "anonymous" is the default tenant.
+# local-blocks: powers the TraceQL metrics API (Grafana Explore Traces app)
 overrides:
   defaults:
     metrics_generator:
-      processors: [service-graphs, span-metrics]
+      processors: [service-graphs, span-metrics, local-blocks]
