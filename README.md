@@ -19,6 +19,81 @@ Also demonstrates **DB + cache instrumentation**:
 
 ---
 
+## Observability Stack & OpenTelemetry Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Go Service  (host :8080)                                               │
+│                                                                         │
+│  ┌──────────────┐  OTLP gRPC   ┌──────────────────────────────────┐    │
+│  │ Traces       │ ────────────► │                                  │    │
+│  │ (OTel SDK)   │              │   Grafana Alloy  (:4317)          │    │
+│  ├──────────────┤  OTLP gRPC   │                                  │    │
+│  │ Logs         │ ────────────► │   otelcol.receiver.otlp          │    │
+│  │ (slog+OTel)  │              │         │                        │    │
+│  ├──────────────┤  HTTP scrape │         ▼                        │    │
+│  │ Metrics /    │ ◄─────────── │   otelcol.processor.batch        │    │
+│  │ metrics      │              │         │              │          │    │
+│  │ (Prometheus) │              │    traces│         logs│          │    │
+│  └──────────────┘              │         ▼              ▼          │    │
+│                                │  otelcol.exporter  otelcol.      │    │
+│  ┌──────────────┐  HTTP push   │  .otlp (Tempo)     exporter.     │    │
+│  │ Profiling    │ ────────────► │                    loki          │    │
+│  │ (Pyroscope   │              │                                  │    │
+│  │  Go SDK)     │              │  prometheus.scrape → remote_write │    │
+│  └──────────────┘              │  (Mimir)                         │    │
+│                                └──────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────┘
+           │ traces           │ logs            │ metrics    │ profiles
+           ▼                  ▼                 ▼            ▼
+    ┌────────────┐    ┌─────────────┐   ┌──────────┐  ┌───────────┐
+    │   Tempo    │    │    Loki     │   │  Mimir   │  │Pyroscope  │
+    │  :3200     │    │   :3100     │   │  :9009   │  │  :4040    │
+    │            │    │             │   │          │  │           │
+    │ metrics_   │───►│             │   │          │  │           │
+    │ generator  │    │             │   │          │  │           │
+    │ (RED+graph)│    │             │   │          │  │           │
+    └─────┬──────┘    └──────┬──────┘   └────┬─────┘  └─────┬─────┘
+          │ remote_write     │               │              │
+          └──────────────────┘───────────────┘              │
+                             │                              │
+                             ▼                              │
+                    ┌─────────────────┐                     │
+                    │     Grafana     │ ◄───────────────────┘
+                    │    :3000        │
+                    │                 │
+                    │ Tempo datasource│──── TraceQL search
+                    │  ↳ tracesToLogs │──── jump to Loki logs
+                    │  ↳ tracesToProf │──── jump to Pyroscope flamegraph
+                    │  ↳ serviceMap   │──── service graph (from Mimir)
+                    │                 │
+                    │ Loki datasource │──── derivedFields → Tempo trace
+                    └─────────────────┘
+```
+
+### Signal details
+
+| Signal | SDK / Library | Transport | Alloy component | Backend |
+|---|---|---|---|---|
+| **Traces** | `go.opentelemetry.io/otel` | OTLP gRPC → Alloy :4317 | `otelcol.exporter.otlp` | Tempo |
+| **Logs** | `log/slog` + `otelslog` bridge | OTLP gRPC → Alloy :4317 | `otelcol.exporter.loki` | Loki |
+| **Metrics** | OTel Prometheus exporter | HTTP pull ← Alloy scrape :8080 | `prometheus.remote_write` | Mimir |
+| **Profiles** | `grafana/pyroscope-go` | HTTP push → Pyroscope :4040 | _(direct, no Alloy)_ | Pyroscope |
+| **Span metrics** | Tempo `metrics_generator` | remote_write | _(Tempo internal)_ | Mimir |
+| **Docker logs** | Alloy `loki.source.docker` | Docker socket | `loki.write` | Loki |
+
+### Cross-signal correlations
+
+| From | To | How |
+|---|---|---|
+| Trace → Logs | Tempo → Loki | `trace_id` in OTLP log attributes; Loki `derivedFields` links back |
+| Trace → Profile | Tempo → Pyroscope | `otelpyroscope` sets `profile_id` pprof label per span |
+| Log → Trace | Loki → Tempo | Click trace ID in log line |
+| Metrics → Traces | Mimir → Tempo | Exemplars on `http_server_request_duration_seconds` |
+| Service Map | Tempo → Mimir | `metrics_generator` `service-graphs` processor |
+
+---
+
 ## Local Development
 
 The Go service runs on your **host machine** (for fast iteration without rebuilding images).
