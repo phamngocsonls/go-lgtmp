@@ -1,0 +1,161 @@
+// Grafana Alloy pipeline for the go-lgtmp local dev stack.
+//
+// Signal flow:
+//
+//   Go service (OTLP gRPC :4317)
+//     ├── Traces  → otelcol.receiver.otlp → otelcol.processor.batch → otelcol.exporter.otlp (Tempo :4317)
+//     └── Logs    → otelcol.receiver.otlp → otelcol.processor.batch → otelcol.exporter.loki → loki.write (Loki :3100)
+//
+//   Alloy scrapes Go service /metrics (host :8080)
+//     └── prometheus.scrape → prometheus.remote_write (Mimir :9009)
+//
+// The Alloy UI is available at http://localhost:12345
+
+// ── OTLP receiver ─────────────────────────────────────────────────────────────
+// Accepts traces and logs from the Go service.
+// Metrics are NOT accepted here — the service exposes /metrics for Prometheus scrape.
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.default.input]
+    logs   = [otelcol.processor.batch.default.input]
+  }
+}
+
+// ── Batch processor ────────────────────────────────────────────────────────────
+// Buffers spans and log records before export to reduce network round-trips.
+otelcol.processor.batch "default" {
+  timeout             = "5s"
+  send_batch_size     = 1024
+  send_batch_max_size = 2048
+
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+    logs   = [otelcol.exporter.loki.default.input]
+  }
+}
+
+// ── Traces → Tempo ─────────────────────────────────────────────────────────────
+// Forward OTLP spans to Tempo over gRPC (unencrypted — local dev only).
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// ── Logs → Loki ───────────────────────────────────────────────────────────────
+// Convert OTel LogRecords to Loki entries, then push to Loki's push API.
+//
+// Conversion rules:
+//   - LogRecord.Body              → Loki log line
+//   - Resource attributes         → Loki stream labels (service.name → service_name)
+//   - Log-level attributes        → JSON appended to body (includes trace_id, span_id)
+//   - LogRecord.TraceID / SpanID  → structured metadata (traceId, spanId) for Loki v3
+//
+// Grafana Loki's "filterByTraceID" feature uses the native traceId structured
+// metadata to link logs to Tempo traces without any custom query.
+otelcol.exporter.loki "default" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ── Metrics: scrape Go service → Mimir ────────────────────────────────────────
+// Scrapes the Go service's Prometheus /metrics endpoint.
+//
+// The service runs on the HOST (not inside Docker), so we use host.docker.internal
+// which Docker Desktop (Mac/Windows) resolves to the host machine automatically.
+// On Linux with Docker Engine, add to docker-compose:
+//   extra_hosts: ["host.docker.internal:host-gateway"]
+//
+// Scraped metrics:
+//   http_server_request_duration_seconds  — RED metrics (rate, errors, duration)
+//   demo_active_requests                  — in-flight requests gauge
+//   demo_fibonacci_computed_total         — fibonacci calls by n value
+//   db_client_connections_*               — PostgreSQL pool metrics (otelsql)
+//   db_client_operation_duration_seconds  — Redis command latency (redisotel)
+//
+// host.docker.internal resolves to the host machine:
+//   Docker Desktop (Mac/Windows): works automatically.
+//   Docker Engine (Linux): resolved via extra_hosts in docker-compose.yml.
+prometheus.scrape "go_lgtmp" {
+  targets = [
+    {
+      "__address__"    = "host.docker.internal:8080",
+      "service_name"   = "go-lgtmp",
+      "job"            = "go-lgtmp",
+    },
+  ]
+
+  metrics_path    = "/metrics"
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
+
+// ── Docker container logs → Loki ──────────────────────────────────────────────
+// Collects stdout/stderr from all Docker containers running in the compose stack
+// (postgres, redis, tempo, loki, mimir, pyroscope — NOT the Go service which
+// runs on the host and sends logs via OTLP above).
+//
+// Requires: /var/run/docker.sock mounted into the Alloy container (see docker-compose.yml).
+//
+// Each container's logs land in Loki with labels:
+//   container_name = "go-lgtmp-postgres-1"
+//   compose_project = "go-lgtmp"
+//   compose_service = "postgres"   (docker compose service name)
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project"]   // only compose-managed containers
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  forward_to    = [loki.write.default.receiver]
+  relabel_rules = loki.relabel.docker_labels.rules
+}
+
+// Map Docker labels to human-readable Loki stream labels.
+loki.relabel "docker_labels" {
+  forward_to = []   // used only for rules — actual forwarding is in loki.source.docker
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container_name"
+  }
+}

@@ -7,7 +7,7 @@ metadata:
 data:
   # OpenTelemetry — point to your Alloy / OTel Collector OTLP gRPC receiver
   OTEL_SERVICE_NAME: "go-lgtmp"
-  OTEL_SERVICE_VERSION: "0.0.1"
+  OTEL_SERVICE_VERSION: "0.0.2"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy.monitoring.svc.cluster.local:4317"
   OTEL_EXPORTER_OTLP_INSECURE: "true"
 

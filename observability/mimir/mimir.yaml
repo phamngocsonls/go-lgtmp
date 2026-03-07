@@ -1,0 +1,71 @@
+# Mimir configuration for the go-lgtmp local dev stack.
+#
+# Runs in single-process (monolithic) mode — all components in one binary.
+# Exposes a Prometheus-compatible API:
+#   Remote write:  POST http://mimir:9009/api/v1/push
+#   Query:         GET  http://mimir:9009/prometheus
+#
+# Receives metrics from:
+#   - Grafana Alloy (Prometheus scrape of Go service /metrics → remote write)
+#   - Tempo metrics generator (service-graph + span-metrics → remote write)
+
+# Run all components in a single process.
+target: all
+
+# Disable multi-tenancy so requests without X-Scope-OrgID are accepted.
+# All data is stored under the "anonymous" tenant.
+# Without this, remote writes from Alloy and Tempo metrics generator are rejected.
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  grpc_listen_port: 9095
+  log_level: warn
+
+# ── Block storage (local filesystem) ─────────────────────────────────────────
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/blocks
+  tsdb:
+    dir: /data/tsdb
+    retention_period: 24h   # keep 24 hours of data in local dev
+
+# ── Ring (single-node, no distributed coordination needed) ───────────────────
+ingester:
+  ring:
+    replication_factor: 1
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+# ── Compactor ────────────────────────────────────────────────────────────────
+compactor:
+  data_dir: /data/compactor
+
+# ── Ruler ────────────────────────────────────────────────────────────────────
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/ruler
+
+# ── Alertmanager ─────────────────────────────────────────────────────────────
+alertmanager_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/alertmanager
+
+# ── Common storage root ───────────────────────────────────────────────────────
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data/common
+
+# ── Limits ───────────────────────────────────────────────────────────────────
+limits:
+  # Accept out-of-order samples (common when Alloy and Tempo both push metrics).
+  out_of_order_time_window: 5m
+  # Enable native histograms (used by Tempo span-metrics and OTel SDK histograms).
+  native_histograms_ingestion_enabled: true

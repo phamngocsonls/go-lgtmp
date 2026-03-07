@@ -4,7 +4,7 @@ IMAGE_NAME  := go-lgtmp
 IMAGE_TAG   ?= dev
 REGISTRY    ?= ghcr.io/go-lgtmp
 
-.PHONY: run infra infra-down build test lint verify docker-build docker-push clean help
+.PHONY: run infra infra-down build test lint verify load docker-build docker-push clean help
 
 ## run: Run the service locally (requires LGTMP stack — see 'make infra')
 run:
@@ -36,6 +36,21 @@ lint:
 verify:
 	go mod verify
 	go build ./...
+
+## load: Generate demo traffic (requires running service on :8080)
+load:
+	@echo "Sending traffic to http://localhost:8080 — Ctrl+C to stop"
+	@while true; do \
+		curl -sf http://localhost:8080/ping              > /dev/null; \
+		curl -sf http://localhost:8080/rolldice          > /dev/null; \
+		curl -sf http://localhost:8080/rolldice          > /dev/null; \
+		curl -sf http://localhost:8080/rolldice          > /dev/null; \
+		n=$$((RANDOM % 35 + 5)); \
+		curl -sf "http://localhost:8080/fibonacci?n=$$n" > /dev/null; \
+		curl -sf http://localhost:8080/db/users          > /dev/null 2>&1 || true; \
+		curl -sf http://localhost:8080/cache/users/1     > /dev/null 2>&1 || true; \
+		sleep 0.3; \
+	done
 
 ## docker-build: Build the Docker image
 docker-build:

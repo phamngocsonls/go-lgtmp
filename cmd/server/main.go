@@ -114,7 +114,8 @@ func main() {
 	// Health probes and /metrics are excluded from OTel instrumentation via
 	// WithFilter below — registering them on the router is still needed for routing.
 	r.Get("/healthz", handler.Healthz)
-	r.Get("/readyz", handler.Readyz)
+	// Readyz pings DB and Redis (if configured) to signal real readiness.
+	r.Get("/readyz", h.Readyz)
 	r.Handle("/metrics", promhttp.Handler())
 
 	// Demo endpoints

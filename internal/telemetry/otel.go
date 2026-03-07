@@ -191,11 +191,16 @@ func initLogger(ctx context.Context, conn *grpc.ClientConn, res *resource.Resour
 	otellog.SetLoggerProvider(lp)
 
 	// Bridge: slog → OTel LoggerProvider + JSON stdout fan-out.
+	// LOG_LEVEL is enforced via multiHandler.Enabled so both destinations
+	// (Loki via OTLP and JSON stdout) respect the same minimum level.
+	// otelslog.Handler.Enabled() always returns true (OTel SDK has no
+	// built-in level filter), so we must gate at the multiHandler level.
+	level := parseLogLevel(cfg.LogLevel)
 	otelHandler := otelslog.NewHandler("github.com/go-lgtmp/go-lgtmp")
 	stdoutHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: parseLogLevel(cfg.LogLevel),
+		Level: level,
 	})
-	slog.SetDefault(slog.New(&multiHandler{otelHandler, stdoutHandler}))
+	slog.SetDefault(slog.New(&multiHandler{level, otelHandler, stdoutHandler}))
 
 	return lp.Shutdown, nil
 }
@@ -223,13 +228,17 @@ func parseLogLevel(level string) slog.Level {
 	}
 }
 
-// multiHandler fans out slog records to multiple handlers.
+// multiHandler fans out slog records to multiple handlers behind a shared
+// minimum level. The level gate is enforced here because otelslog.Handler
+// always returns true from Enabled (the OTel SDK has no built-in level
+// filter), so delegating to it would make LOG_LEVEL ineffective for Loki.
 type multiHandler struct {
-	a, b slog.Handler
+	level slog.Level
+	a, b  slog.Handler
 }
 
-func (m *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return m.a.Enabled(ctx, level) || m.b.Enabled(ctx, level)
+func (m *multiHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= m.level
 }
 
 func (m *multiHandler) Handle(ctx context.Context, r slog.Record) error {
@@ -242,9 +251,9 @@ func (m *multiHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (m *multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &multiHandler{m.a.WithAttrs(attrs), m.b.WithAttrs(attrs)}
+	return &multiHandler{m.level, m.a.WithAttrs(attrs), m.b.WithAttrs(attrs)}
 }
 
 func (m *multiHandler) WithGroup(name string) slog.Handler {
-	return &multiHandler{m.a.WithGroup(name), m.b.WithGroup(name)}
+	return &multiHandler{m.level, m.a.WithGroup(name), m.b.WithGroup(name)}
 }

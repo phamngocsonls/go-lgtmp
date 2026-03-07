@@ -1,0 +1,83 @@
+# Tempo configuration for the go-lgtmp local dev stack.
+#
+# Receives OTLP traces from Grafana Alloy and stores them locally.
+# The metrics generator builds service-graph and span-metrics from traces
+# and remote-writes them to Mimir — this powers the Grafana Tempo service map.
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+  log_level: warn
+
+# ── Trace ingestion ──────────────────────────────────────────────────────────
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+# ── Ingester ─────────────────────────────────────────────────────────────────
+ingester:
+  max_block_duration: 5m   # flush to storage every 5 min (short for local dev)
+
+# ── Compactor ────────────────────────────────────────────────────────────────
+compactor:
+  compaction:
+    block_retention: 1h    # keep traces for 1 hour in local dev
+
+# ── Storage ──────────────────────────────────────────────────────────────────
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+# ── Metrics generator ────────────────────────────────────────────────────────
+# Generates Prometheus metrics FROM trace spans. Enables the service map
+# visualization in the Grafana Tempo datasource.
+#
+# service-graphs: tracks service-to-service call counts and latency
+#   → tempo_service_graph_request_total, tempo_service_graph_request_duration_seconds
+#
+# span-metrics: RED metrics derived from span data
+#   → traces_spanmetrics_calls_total, traces_spanmetrics_duration_seconds
+#
+# These metrics are remote-written to Mimir and used by the Grafana Tempo
+# datasource's "Service Graph" panel (requires serviceMap.datasourceUid = prometheus).
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: docker-compose
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://mimir:9009/api/v1/push
+        send_exemplars: true
+
+# ── Query engine ─────────────────────────────────────────────────────────────
+querier:
+  frontend_worker:
+    frontend_address: 127.0.0.1:9095
+
+query_frontend:
+  search:
+    duration_slo: 5s
+    throughput_bytes_slo: 1.073741824e+09
+
+# ── Per-tenant overrides ──────────────────────────────────────────────────────
+# In single-tenant mode, "anonymous" is the default tenant.
+overrides:
+  defaults:
+    metrics_generator:
+      processors:
+        - service-graphs
+        - span-metrics
+      generate_native_histograms: both

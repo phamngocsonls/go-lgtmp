@@ -1,0 +1,69 @@
+# Loki configuration for the go-lgtmp local dev stack.
+#
+# Logs arrive via Grafana Alloy (OTLP → otelcol.exporter.loki → loki.write).
+# Loki v3 with structured metadata enabled stores OTel log attributes (including
+# trace_id and span_id) as structured metadata for native Tempo correlation.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+# ── Single-process ring (no Consul/etcd needed) ──────────────────────────────
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# ── Schema ───────────────────────────────────────────────────────────────────
+# TSDB (v13) is the Loki v3 default — better query performance and native OTel support.
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# ── Query cache ───────────────────────────────────────────────────────────────
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+# ── Limits ───────────────────────────────────────────────────────────────────
+limits_config:
+  # Required for OTel logs: stores non-label attributes (trace_id, span_id,
+  # http.method, etc.) as structured metadata on each log entry.
+  # This is how the Grafana Loki datasource shows native trace links for OTel logs.
+  allow_structured_metadata: true
+
+  # Enable log volume endpoint (used by Grafana log volume histogram).
+  volume_enabled: true
+
+  # OTel resource attribute → Loki label mapping.
+  # service.name becomes the primary stream label for all OTel logs.
+  otlp_config:
+    resource_attributes:
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - deployment.environment
+
+# ── Ruler (alerting) ─────────────────────────────────────────────────────────
+ruler:
+  alertmanager_url: http://localhost:9093

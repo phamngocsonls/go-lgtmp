@@ -1,0 +1,97 @@
+apiVersion: 1
+
+# Grafana datasources for the go-lgtmp demo stack.
+# All four LGTMP pillars are pre-configured with cross-datasource correlations:
+#
+#   Loki  → Tempo  : "trace_id" derived field links each log line to its trace
+#   Tempo → Loki   : tracesToLogsV2 shows logs scoped to the selected trace
+#   Tempo → Pyroscope: tracesToProfiles links a span to its CPU flamegraph
+#   Prometheus → Tempo: exemplarTraceIdDestinations links metric points to traces
+#
+# No manual setup needed — these are loaded automatically on Grafana start.
+
+datasources:
+
+  # ── Prometheus (Mimir) ────────────────────────────────────────────────────
+  # Serves as the default datasource. Mimir exposes a Prometheus-compatible API.
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://mimir:9009/prometheus
+    access: proxy
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      # Exemplar support: metric points that carry a trace_id jump to Tempo.
+      # Requires the SDK to attach exemplars (OTel Prometheus exporter does this
+      # automatically when a span is active during metric recording).
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  # ── Tempo ─────────────────────────────────────────────────────────────────
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    url: http://tempo:3200
+    access: proxy
+    isDefault: false
+    jsonData:
+      httpMethod: GET
+      # Service map uses Prometheus metrics generated from trace spans.
+      serviceMap:
+        datasourceUid: prometheus
+      # Trace → Logs: clicking "Logs" on a trace opens Loki filtered to that trace_id.
+      # customQuery: false uses Grafana's built-in trace-to-logs correlation which
+      # queries Loki via the structured metadata traceId set by Alloy's loki exporter.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: false
+      # Trace → Profiles: clicking "Profiles" on a span opens Pyroscope filtered
+      # to that span's time window and tagged with the trace/span IDs (set by
+      # otelpyroscope wrapping the TracerProvider — see telemetry/otel.go).
+      tracesToProfiles:
+        datasourceUid: pyroscope
+        profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
+        customQuery: false
+        tags:
+          - key: service.name
+            value: service_name
+      # Node graph for trace waterfall view.
+      nodeGraph:
+        enabled: true
+      # Loki search: log panel in trace view queries Loki by trace_id.
+      lokiSearch:
+        datasourceUid: loki
+
+  # ── Loki ──────────────────────────────────────────────────────────────────
+  - name: Loki
+    type: loki
+    uid: loki
+    url: http://loki:3100
+    access: proxy
+    isDefault: false
+    jsonData:
+      # Derived fields: extract trace_id from JSON log lines and render a
+      # "View Trace" link that opens the trace in Tempo.
+      #
+      # The regex matches the JSON field emitted by slog.JSONHandler:
+      #   {"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736",...}
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"([a-f0-9]{32})"'
+          url: "$${__value.raw}"
+          datasourceUid: tempo
+          urlDisplayLabel: View Trace in Tempo
+
+  # ── Pyroscope ─────────────────────────────────────────────────────────────
+  - name: Pyroscope
+    type: grafana-pyroscope-datasource
+    uid: pyroscope
+    url: http://pyroscope:4040
+    access: proxy
+    isDefault: false
