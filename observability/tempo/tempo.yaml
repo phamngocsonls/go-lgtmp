@@ -1,10 +1,9 @@
 # Tempo configuration for the go-lgtmp local dev stack.
+# Verified against grafana/tempo:latest (v2.10.x)
 #
 # Receives OTLP traces from Grafana Alloy and stores them locally.
 # The metrics generator builds service-graph and span-metrics from traces
 # and remote-writes them to Mimir — this powers the Grafana Tempo service map.
-
-stream_over_http_enabled: true
 
 server:
   http_listen_port: 3200
@@ -24,11 +23,6 @@ distributor:
 # ── Ingester ─────────────────────────────────────────────────────────────────
 ingester:
   max_block_duration: 5m   # flush to storage every 5 min (short for local dev)
-
-# ── Compactor ────────────────────────────────────────────────────────────────
-compactor:
-  compaction:
-    block_retention: 1h    # keep traces for 1 hour in local dev
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 storage:
@@ -62,16 +56,6 @@ metrics_generator:
       - url: http://mimir:9009/api/v1/push
         send_exemplars: true
 
-# ── Query engine ─────────────────────────────────────────────────────────────
-querier:
-  frontend_worker:
-    frontend_address: 127.0.0.1:9095
-
-query_frontend:
-  search:
-    duration_slo: 5s
-    throughput_bytes_slo: 1.073741824e+09
-
 # ── Per-tenant overrides ──────────────────────────────────────────────────────
 # In single-tenant mode, "anonymous" is the default tenant.
 overrides:
@@ -80,4 +64,3 @@ overrides:
       processors:
         - service-graphs
         - span-metrics
-      generate_native_histograms: both

@@ -17,7 +17,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.24"
 
 jobs:
 
@@ -67,7 +67,7 @@ jobs:
 
       # Bump semver tag: reads latest vX.Y.Z, bumps patch/minor/major based on
       # commit message, creates and pushes the new tag.
-      # On first push with no existing tags, creates v0.0.1.
+      # initial_version is the fallback when no tags exist at all (first run only).
       - name: Bump version tag
         id: tag
         uses: mathieudutour/github-tag-action@v6.2
@@ -75,7 +75,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
           tag_prefix: v
-          initial_version: 0.0.1
+          initial_version: 0.1.0
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3

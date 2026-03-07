@@ -42,24 +42,20 @@ services:
       retries: 5
 
   # ── Observability pipeline ─────────────────────────────────────────────────
+  # Note: grafana/tempo, loki, mimir, pyroscope are distroless images —
+  # they have no shell, wget, or curl. Health checks use service_started
+  # (container up) rather than service_healthy (HTTP ready). Alloy and
+  # Grafana have built-in retry logic so transient startup ordering is fine.
 
   tempo:
     image: grafana/tempo:latest
     ports:
       - "3200:3200"   # Tempo HTTP API (Grafana datasource)
       - "9095:9095"   # Tempo gRPC
-      # Port 4317 (OTLP gRPC from Alloy) is accessible within the Docker network
-      # without being published to the host — no entry needed here.
     volumes:
       - ./observability/tempo/tempo.yaml:/etc/tempo.yaml:ro
       - tempo_data:/var/tempo
     command: -config.file=/etc/tempo.yaml
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:3200/ready -O /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   loki:
     image: grafana/loki:latest
@@ -69,12 +65,6 @@ services:
       - ./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
       - loki_data:/loki
     command: -config.file=/etc/loki/loki.yaml
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:3100/ready -O /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   mimir:
     image: grafana/mimir:latest
@@ -84,12 +74,6 @@ services:
       - ./observability/mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
       - mimir_data:/data
     command: -config.file=/etc/mimir/mimir.yaml
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:9009/ready -O /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   pyroscope:
     image: grafana/pyroscope:latest
@@ -97,15 +81,9 @@ services:
       - "4040:4040"
     volumes:
       - pyroscope_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:4040/ready -O /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   # Grafana Alloy: OTel collector + Prometheus scraper + log forwarder.
-  # See alloy/config.alloy for the full pipeline definition.
+  # See observability/alloy/config.alloy for the full pipeline definition.
   alloy:
     image: grafana/alloy:latest
     ports:
@@ -123,12 +101,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      tempo:
-        condition: service_healthy
-      loki:
-        condition: service_healthy
-      mimir:
-        condition: service_healthy
+      - tempo
+      - loki
+      - mimir
 
   grafana:
     image: grafana/grafana:latest
@@ -142,14 +117,10 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
     depends_on:
-      tempo:
-        condition: service_healthy
-      loki:
-        condition: service_healthy
-      mimir:
-        condition: service_healthy
-      pyroscope:
-        condition: service_healthy
+      - tempo
+      - loki
+      - mimir
+      - pyroscope
 
 volumes:
   postgres_data:
