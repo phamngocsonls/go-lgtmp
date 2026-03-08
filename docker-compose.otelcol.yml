@@ -1,0 +1,138 @@
+# Alternative local dev stack using OpenTelemetry Collector Contrib
+# instead of Grafana Alloy as the collection pipeline.
+#
+# Backends (Tempo, Loki, Mimir, Pyroscope, Grafana) are identical to
+# docker-compose.yml — only the collector changes.
+#
+# Usage:
+#   make infra-otelcol          # start this stack
+#   source .env.example && go run ./cmd/server
+#   make load                   # generate demo traffic
+#   make infra-otelcol-down     # stop
+#
+# After Grafana starts, import dashboard ID 22784:
+#   Grafana → Dashboards → Import → ID 22784
+#   https://grafana.com/grafana/dashboards/22784-lightweight-apm-for-opentelemetry/
+#
+# NOTE: ports :4317, :4318, :3000 conflict with docker-compose.yml.
+# Run only one stack at a time.
+#
+# Key differences from docker-compose.yml (Alloy stack):
+#   - OTel Collector instead of Alloy (YAML config vs River DSL)
+#   - Metrics sent via OTLP to Mimir (not Prometheus remote write)
+#   - No Alloy debug UI (:12345)
+#   - No Docker container log collection
+
+services:
+
+  # ── Databases ─────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16.13-alpine
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4.8-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Observability backends (same as docker-compose.yml) ─────────────────────
+
+  tempo:
+    image: grafana/tempo:2.10.1
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "9095:9095"   # Tempo gRPC
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    command: -config.file=/etc/tempo.yaml
+
+  loki:
+    image: grafana/loki:3.6.7
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki.yaml
+
+  mimir:
+    image: grafana/mimir:2.17.7
+    ports:
+      - "9009:9009"
+    volumes:
+      - ./observability/mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir_data:/data
+    command: -config.file=/etc/mimir/mimir.yaml
+
+  pyroscope:
+    image: grafana/pyroscope:1.18.1
+    ports:
+      - "4040:4040"
+    volumes:
+      - pyroscope_data:/data
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - tempo
+      - loki
+      - mimir
+      - pyroscope
+
+  # ── OTel Collector Contrib ───────────────────────────────────────────────────
+  # Replaces Grafana Alloy. Receives OTLP signals from Go service, scrapes
+  # /metrics, and forwards everything to the backends above.
+  #
+  # Check for newer versions: https://github.com/open-telemetry/opentelemetry-collector-contrib/releases
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.117.0
+    ports:
+      - "4317:4317"   # OTLP gRPC  (traces + logs from Go service)
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./observability/otelcol/otelcol.yaml:/etc/otelcol/config.yaml:ro
+    command: ["--config=/etc/otelcol/config.yaml"]
+    # host.docker.internal lets the collector scrape /metrics from the Go service
+    # running on the host machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - tempo
+      - loki
+      - mimir
+
+volumes:
+  postgres_data:
+  tempo_data:
+  loki_data:
+  mimir_data:
+  pyroscope_data:
+  grafana_data:

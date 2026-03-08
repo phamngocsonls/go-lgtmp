@@ -4,9 +4,11 @@
 # Exposes a Prometheus-compatible API:
 #   Remote write:  POST http://mimir:9009/api/v1/push
 #   Query:         GET  http://mimir:9009/prometheus
+#   OTLP ingest:   POST http://mimir:9009/otlp/v1/metrics
 #
 # Receives metrics from:
-#   - Grafana Alloy (Prometheus scrape of Go service /metrics → remote write)
+#   - Grafana Alloy  (Prometheus scrape of Go service /metrics → remote write)
+#   - OTel Collector (Prometheus scrape → OTLP HTTP → /otlp/v1/metrics)
 #   - Tempo metrics generator (service-graph + span-metrics → remote write)
 
 # Run all components in a single process.
@@ -69,3 +71,16 @@ limits:
   out_of_order_time_window: 5m
   # Enable native histograms (used by Tempo span-metrics and OTel SDK histograms).
   native_histograms_ingestion_enabled: true
+
+  # ── OTel resource attribute promotion (for OTLP ingestion path) ─────────────
+  # Required for Grafana dashboard 22784 (Lightweight APM for OpenTelemetry).
+  # Used when OTel Collector sends metrics via OTLP HTTP (make infra-otelcol).
+  # Has no effect on the Alloy remote-write path.
+  #
+  # Keep service.name / service.namespace / service.instance.id as identifying
+  # labels instead of promoting them into __meta__ or target_info only.
+  otel_keep_identifying_resource_attributes: true
+  # Promote these OTel resource attributes as regular Prometheus-style labels
+  # on every metric series. Required so dashboard filters like service_name="…"
+  # resolve correctly. No whitespace in the comma-separated list.
+  promote_otel_resource_attributes: "service.instance.id,service.name,service.namespace,service.version,deployment.environment,deployment.environment.name"

@@ -1,0 +1,103 @@
+# OpenTelemetry Collector Contrib configuration for go-lgtmp.
+#
+# Alternative to Grafana Alloy — use with: make infra-otelcol
+#
+# Signal flow:
+#   Go service (OTLP gRPC :4317)
+#     ├── Traces → batch → Tempo   (OTLP HTTP  tempo:4318)
+#     └── Logs   → batch → Loki    (OTLP HTTP  loki:3100/otlp)
+#
+#   Go service /metrics  (scraped via Prometheus receiver)
+#     └── Metrics → batch → Mimir  (OTLP HTTP  mimir:9009/otlp)
+#
+# The Prometheus receiver converts scraped metrics + target_info to OTLP,
+# preserving resource attributes (service.name, service.version, …) so Mimir
+# can promote them as metric labels for dashboard 22784.
+#
+# Note: Docker container log collection is not supported by this config.
+#       Infrastructure logs (postgres, redis, tempo, …) are not forwarded to Loki.
+#       Use make infra (Alloy) if you need container logs.
+
+receivers:
+
+  # ── OTLP receiver ────────────────────────────────────────────────────────────
+  # Accepts traces and logs from the Go service.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # ── Prometheus receiver ──────────────────────────────────────────────────────
+  # Scrapes the Go service's /metrics endpoint.
+  # The OTel Prometheus exporter emits target_info with all resource attributes
+  # (service.name, service.version, deployment.environment, …). The collector
+  # converts this + all metrics to OTLP before forwarding to Mimir.
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: go-lgtmp
+          scrape_interval: 15s
+          scrape_timeout: 10s
+          static_configs:
+            - targets: [host.docker.internal:8080]
+              labels:
+                service_name: go-lgtmp
+                job: go-lgtmp
+
+processors:
+
+  # ── Batch processor ──────────────────────────────────────────────────────────
+  # Buffers spans, log records, and data points before export to reduce
+  # network round-trips. Mirrors the Alloy batch processor settings.
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+
+  # ── Traces → Tempo ───────────────────────────────────────────────────────────
+  # Tempo OTLP HTTP receiver listens on :4318 inside the Docker network.
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+    tls:
+      insecure: true
+
+  # ── Logs → Loki ──────────────────────────────────────────────────────────────
+  # Loki v3 native OTLP ingestion — maps OTel log attributes to Loki labels
+  # and structured metadata (see observability/loki/loki.yaml otlp_config).
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+  # ── Metrics → Mimir ──────────────────────────────────────────────────────────
+  # Uses OTLP ingestion (not Prometheus remote write) so Mimir can promote
+  # OTel resource attributes (service.name, …) as metric labels.
+  # Requires Mimir: otel_keep_identifying_resource_attributes + promote_otel_resource_attributes
+  # (see observability/mimir/mimir.yaml).
+  otlphttp/mimir:
+    endpoint: http://mimir:9009/otlp
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+
+    traces:
+      receivers:  [otlp]
+      processors: [batch]
+      exporters:  [otlphttp/tempo]
+
+    logs:
+      receivers:  [otlp]
+      processors: [batch]
+      exporters:  [otlphttp/loki]
+
+    # prometheus receiver + otlp receiver (if service pushes metrics via OTLP)
+    metrics:
+      receivers:  [otlp, prometheus]
+      processors: [batch]
+      exporters:  [otlphttp/mimir]
