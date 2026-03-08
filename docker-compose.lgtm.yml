@@ -1,0 +1,64 @@
+# Minimal dev stack using grafana/otel-lgtm — single container bundles
+# Tempo + Loki + Prometheus + Pyroscope + Grafana + OTel Collector.
+#
+# Use this as a lightweight alternative when you want fast startup
+# and don't need the full Alloy-based production-like stack.
+#
+# Comparison with docker-compose.yml (full Alloy stack):
+#   Collector  : OTel Collector    vs  Grafana Alloy
+#   Metrics    : Prometheus        vs  Grafana Mimir
+#   Observ.    : 1 bundled image   vs  6 separate services
+#   Debug UI   : none              vs  Alloy UI :12345
+#   Profiles   : Pyroscope :4040   vs  Pyroscope :4040 (same)
+#   Custom cfg : limited           vs  full control
+#
+# Usage:
+#   make infra-lgtm          # start this stack
+#   source .env.example && go run ./cmd/server
+#   make infra-lgtm-down     # stop
+#
+# NOTE: ports :3000, :4317, :4318, :4040 conflict with docker-compose.yml.
+# Run only one stack at a time.
+
+services:
+
+  # Single image: Tempo + Loki + Prometheus + Pyroscope + Grafana + OTel Collector
+  # Source: https://github.com/grafana/docker-otel-lgtm
+  lgtm:
+    image: grafana/otel-lgtm:0.8.1
+    ports:
+      - "3000:3000"   # Grafana UI — http://localhost:3000
+      - "4040:4040"   # Pyroscope
+      - "4317:4317"   # OTLP gRPC (traces + logs)
+      - "4318:4318"   # OTLP HTTP
+      - "9090:9090"   # Prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+
+  # ── Databases (same as full stack) ────────────────────────────────────────────
+  postgres:
+    image: postgres:16.13-alpine
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4.8-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
