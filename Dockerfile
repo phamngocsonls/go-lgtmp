@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # TARGETARCH is set automatically by Docker Buildx for multi-arch builds
 # (e.g. docker buildx build --platform linux/amd64,linux/arm64).

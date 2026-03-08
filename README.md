@@ -474,10 +474,10 @@ go-lgtmp/
 │       └── middleware.go                # Logging middleware with trace_id/span_id
 ├── observability/
 │   ├── alloy/config.alloy               # Alloy pipeline: OTLP → Tempo/Loki, scrape → Mimir, Docker logs → Loki
+│   ├── grafana/provisioning/            # Auto-provisioned datasources + APM dashboard
 │   ├── tempo/tempo.yaml                 # Tempo single-node config
 │   ├── loki/loki.yaml                   # Loki config
 │   └── mimir/mimir.yaml                 # Mimir config
-├── grafana/provisioning/                # Auto-provisioned datasources (Tempo, Loki, Mimir, Pyroscope)
 ├── docker-compose.yml                   # Full local dev stack
 ├── k8s/                                 # Kubernetes manifests
 ├── .github/workflows/ci.yml             # CI: lint + test + tag + publish image
