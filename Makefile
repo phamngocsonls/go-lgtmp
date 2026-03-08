@@ -4,7 +4,7 @@ IMAGE_NAME  := go-lgtmp
 IMAGE_TAG   ?= dev
 REGISTRY    ?= ghcr.io/go-lgtmp
 
-.PHONY: run infra infra-down infra-lgtm infra-lgtm-down build test lint verify load docker-build docker-push clean help
+.PHONY: run infra infra-down build test lint verify load docker-build docker-push clean help
 
 ## run: Run the service locally (requires LGTMP stack — see 'make infra')
 run:
@@ -17,14 +17,6 @@ infra:
 ## infra-down: Stop and remove local dev infrastructure
 infra-down:
 	docker compose down -v
-
-## infra-lgtm: Start simple stack (grafana/otel-lgtm single image — OTel Collector, Prometheus, no Alloy/Mimir)
-infra-lgtm:
-	docker compose -f docker-compose.lgtm.yml up -d
-
-## infra-lgtm-down: Stop simple stack
-infra-lgtm-down:
-	docker compose -f docker-compose.lgtm.yml down -v
 
 ## build: Compile the binary to ./bin/server
 build:
