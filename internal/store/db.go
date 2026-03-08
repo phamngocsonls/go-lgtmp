@@ -82,6 +82,15 @@ func OpenDB(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("register db stats metrics: %w", err)
 	}
 
+	// Verify the connection is actually reachable at startup.
+	// sql.Open only validates the DSN format; the first real network call
+	// happens here so bad credentials or unreachable hosts fail fast.
+	if err := db.PingContext(context.Background()); err != nil {
+		_ = statsReg.Unregister()
+		_ = db.Close()
+		return nil, fmt.Errorf("ping db: %w", err)
+	}
+
 	return &DB{db: db, statsReg: statsReg}, nil
 }
 

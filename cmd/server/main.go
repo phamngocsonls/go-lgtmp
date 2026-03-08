@@ -64,10 +64,12 @@ func main() {
 		if err != nil {
 			slog.Warn("database unavailable, /db/* endpoints disabled", "error", err)
 		} else {
-			if err := db.CreateUsersTable(context.Background()); err != nil {
+			migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := db.CreateUsersTable(migrateCtx); err != nil {
 				slog.Warn("failed to create users table", "error", err)
 			}
-			slog.Info("database connected", "dsn", cfg.DatabaseDSN)
+			migrateCancel()
+			slog.Info("database connected")
 		}
 	}
 
